@@ -1,0 +1,21 @@
+# Images
+*.bmp
+*.png
+*.jpg
+*.jpeg
+*.tif
+*.tiff
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+*.egg-info/
+
+# IDE / tools
+.claude/
+.vscode/
+.idea/
