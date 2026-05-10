@@ -25,6 +25,11 @@ python main.py
 4. 自动创建 GitHub Release
 5. 上传单文件 `circle_board.exe`
 
+当前打包流程已经包含程序图标：
+
+- `icon.ico` 用于 `exe` 图标
+- 运行时窗口图标也会加载同一个 `icon.ico`
+
 ## 触发条件
 
 当前不是每次 `push` 都打包。
@@ -86,4 +91,4 @@ git push origin v1.0.1
 
 - 当前程序打开图片时，要求图片路径为纯英文目录，中文路径会提示不支持。
 - 如果仓库是私有仓库，GitHub Actions 的 Windows 构建会消耗 Actions 分钟数。
-- 如果你以后想加程序图标，可以在打包命令里继续加 `--icon your.ico`。
+- 如果你要更换图标，直接替换项目根目录下的 `icon.ico` 即可。

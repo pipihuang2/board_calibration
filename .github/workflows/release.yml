@@ -30,7 +30,7 @@ jobs:
 
       - name: Build exe
         run: |
-          python -m PyInstaller --noconfirm --clean --onefile --windowed --name circle_board main.py
+          python -m PyInstaller --noconfirm --clean --onefile --windowed --name circle_board --icon icon.ico --add-data "icon.ico;." main.py
 
       - name: Create release and upload exe
         env:
