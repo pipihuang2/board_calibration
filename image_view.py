@@ -21,7 +21,7 @@ class ImageView(QWidget):
         self._drawing = False
         self._start_widget = QPoint()
         self._end_widget = QPoint()
-        self._roi_widget: QRect | None = None
+        self._roi_image: QRect | None = None
 
         self.setMinimumSize(400, 300)
         self.setCursor(Qt.CursorShape.CrossCursor)
@@ -38,23 +38,18 @@ class ImageView(QWidget):
         self._zoom = 1.0
         self._view_cx = w / 2
         self._view_cy = h / 2
-        self._roi_widget = None
+        self._roi_image = None
         self.update()
 
     def clear_roi(self):
-        self._roi_widget = None
+        self._roi_image = None
+        self._drawing = False
         self.update()
 
     def roi_in_image_coords(self) -> QRect | None:
-        if self._roi_widget is None:
+        if self._roi_image is None:
             return None
-        scale, ox, oy = self._transform()
-        r = self._roi_widget.normalized()
-        x1 = max(0, min(self._img_w, int((r.left() - ox) / scale)))
-        y1 = max(0, min(self._img_h, int((r.top() - oy) / scale)))
-        x2 = max(0, min(self._img_w, int(math.ceil((r.right() - ox) / scale))))
-        y2 = max(0, min(self._img_h, int(math.ceil((r.bottom() - oy) / scale))))
-        return QRect(x1, y1, max(0, x2 - x1), max(0, y2 - y1))
+        return self._roi_image.normalized()
 
     # ------------------------------------------------------------------ #
     # Mouse events — ROI drawing
@@ -77,7 +72,9 @@ class ImageView(QWidget):
         if self._drawing and event.button() == Qt.MouseButton.LeftButton:
             self._drawing = False
             self._end_widget = self._clamp_point_to_image(event.pos())
-            self._roi_widget = QRect(self._start_widget, self._end_widget).normalized()
+            self._roi_image = self._widget_rect_to_image_rect(
+                QRect(self._start_widget, self._end_widget).normalized()
+            )
             self.update()
             roi_img = self.roi_in_image_coords()
             if roi_img and roi_img.width() > 5 and roi_img.height() > 5:
@@ -142,8 +139,8 @@ class ImageView(QWidget):
         roi_rect = None
         if self._drawing:
             roi_rect = QRect(self._start_widget, self._end_widget).normalized()
-        elif self._roi_widget:
-            roi_rect = self._roi_widget
+        elif self._roi_image:
+            roi_rect = self._image_rect_to_widget_rect(self._roi_image)
 
         if roi_rect:
             fill = QColor(0, 120, 255, 40)
@@ -288,3 +285,21 @@ class ImageView(QWidget):
         x = min(rect.right(), max(rect.left(), point.x()))
         y = min(rect.bottom(), max(rect.top(), point.y()))
         return QPoint(x, y)
+
+    def _widget_rect_to_image_rect(self, rect: QRect) -> QRect:
+        scale, ox, oy = self._transform()
+        r = rect.normalized()
+        x1 = max(0, min(self._img_w, int((r.x() - ox) / scale)))
+        y1 = max(0, min(self._img_h, int((r.y() - oy) / scale)))
+        x2 = max(0, min(self._img_w, int(math.ceil((r.x() + r.width() - ox) / scale))))
+        y2 = max(0, min(self._img_h, int(math.ceil((r.y() + r.height() - oy) / scale))))
+        return QRect(x1, y1, max(0, x2 - x1), max(0, y2 - y1))
+
+    def _image_rect_to_widget_rect(self, rect: QRect) -> QRect:
+        scale, ox, oy = self._transform()
+        r = rect.normalized()
+        x = int(round(ox + r.x() * scale))
+        y = int(round(oy + r.y() * scale))
+        w = int(round(r.width() * scale))
+        h = int(round(r.height() * scale))
+        return QRect(x, y, w, h)

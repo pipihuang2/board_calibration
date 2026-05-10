@@ -24,7 +24,7 @@ from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QPushButton, QLabel, QTableWidget, QTableWidgetItem,
     QFileDialog, QHeaderView, QFrame, QGraphicsDropShadowEffect,
-    QLineEdit, QSizePolicy,
+    QLineEdit, QSizePolicy, QMessageBox,
 )
 
 from image_view import ImageView
@@ -483,6 +483,14 @@ class MainWindow(QMainWindow):
         )
         if not path:
             return
+        if not self._is_ascii_path(path):
+            QMessageBox.warning(
+                self,
+                "路径不支持中文",
+                "当前程序暂不支持包含中文的图片路径。\n请把图片放到纯英文目录后再打开。",
+            )
+            self.statusBar().showMessage("打开失败：图片路径包含中文，请使用纯英文目录")
+            return
         img = cv2.imread(path, cv2.IMREAD_COLOR)
         if img is None:
             self.statusBar().showMessage(f"无法读取文件: {path}")
@@ -605,6 +613,10 @@ class MainWindow(QMainWindow):
         h, w = self._bgr_image.shape[:2]
         self.lbl_img_x.setText(f"{w} px")
         self.lbl_img_y.setText(f"{h} px")
+
+    @staticmethod
+    def _is_ascii_path(path: str) -> bool:
+        return path.isascii()
 
     @staticmethod
     def _cell(text: str) -> QTableWidgetItem:
