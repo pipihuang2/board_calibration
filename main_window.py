@@ -281,6 +281,14 @@ class MainWindow(QMainWindow):
         self.btn_open = QPushButton("打开图片")
         self.btn_open.clicked.connect(self._open_image)
 
+        self.btn_rotate_left = QPushButton("左旋转")
+        self.btn_rotate_left.setEnabled(False)
+        self.btn_rotate_left.clicked.connect(self._rotate_left)
+
+        self.btn_rotate_right = QPushButton("右旋转")
+        self.btn_rotate_right.setEnabled(False)
+        self.btn_rotate_right.clicked.connect(self._rotate_right)
+
         self.btn_detect = QPushButton("检测椭圆")
         self.btn_detect.setEnabled(False)
         self.btn_detect.clicked.connect(self._detect)
@@ -290,7 +298,13 @@ class MainWindow(QMainWindow):
         self.btn_clear.setEnabled(False)
         self.btn_clear.clicked.connect(self._clear_roi)
 
-        for btn in (self.btn_open, self.btn_detect, self.btn_clear):
+        for btn in (
+            self.btn_open,
+            self.btn_rotate_left,
+            self.btn_rotate_right,
+            self.btn_detect,
+            self.btn_clear,
+        ):
             pl.addWidget(btn)
 
         pl.addSpacing(4)
@@ -476,12 +490,13 @@ class MainWindow(QMainWindow):
         self._bgr_image = img
         self.image_view.load_image(img)
         self._current_roi = None
+        self.btn_rotate_left.setEnabled(True)
+        self.btn_rotate_right.setEnabled(True)
         self.btn_detect.setEnabled(False)
         self.btn_clear.setEnabled(False)
         self._clear_results()
         h, w = img.shape[:2]
-        self.lbl_img_x.setText(f"{w} px")
-        self.lbl_img_y.setText(f"{h} px")
+        self._update_image_info()
         self.statusBar().showMessage(f"已加载: {path}  ({w} × {h})")
 
     def _on_roi_selected(self, roi: QRect):
@@ -542,6 +557,30 @@ class MainWindow(QMainWindow):
         freq_hz = 1_000_000.0 / exposure_us
         self.freq_label.setText(f"{freq_hz:.1f} Hz")
 
+    def _rotate_left(self):
+        self._rotate_image(clockwise=False)
+
+    def _rotate_right(self):
+        self._rotate_image(clockwise=True)
+
+    def _rotate_image(self, clockwise: bool):
+        if self._bgr_image is None:
+            return
+
+        rotate_flag = (
+            cv2.ROTATE_90_CLOCKWISE if clockwise else cv2.ROTATE_90_COUNTERCLOCKWISE
+        )
+        self._bgr_image = cv2.rotate(self._bgr_image, rotate_flag)
+        self.image_view.load_image(self._bgr_image)
+        self._current_roi = None
+        self.btn_detect.setEnabled(False)
+        self.btn_clear.setEnabled(False)
+        self._clear_results()
+        self._update_image_info()
+        direction = "右旋转" if clockwise else "左旋转"
+        h, w = self._bgr_image.shape[:2]
+        self.statusBar().showMessage(f"图片已{direction}，当前尺寸 {w} x {h}")
+
     def _clear_roi(self):
         self.image_view.clear_roi()
         self._current_roi = None
@@ -556,6 +595,16 @@ class MainWindow(QMainWindow):
         self.avg_label.setText("—")
         self.lbl_mult.setText("—")
         self.lbl_post_div.setText("—")
+
+    def _update_image_info(self):
+        if self._bgr_image is None:
+            self.lbl_img_x.setText("—")
+            self.lbl_img_y.setText("—")
+            return
+
+        h, w = self._bgr_image.shape[:2]
+        self.lbl_img_x.setText(f"{w} px")
+        self.lbl_img_y.setText(f"{h} px")
 
     @staticmethod
     def _cell(text: str) -> QTableWidgetItem:
