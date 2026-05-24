@@ -1,5 +1,6 @@
 from __future__ import annotations
 import cv2
+import math
 import numpy as np
 from fractions import Fraction
 
@@ -18,16 +19,16 @@ def best_fraction(ratio: float,
                 best_err = err
                 best_num, best_den = num, den
     return best_num, best_den
-from PyQt6.QtCore import Qt, QRect
+from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QAction, QFont, QColor, QPalette
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QPushButton, QLabel, QTableWidget, QTableWidgetItem,
     QFileDialog, QHeaderView, QFrame, QGraphicsDropShadowEffect,
-    QLineEdit, QSizePolicy, QMessageBox,
+    QLineEdit, QSizePolicy, QMessageBox, QCheckBox,
 )
 
-from image_view import ImageView
+from image_view import ImageView, RotatedRoi
 from ellipse_detector import detect_ellipses
 
 # ── Palette ────────────────────────────────────────────────────────────────
@@ -232,7 +233,7 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(STYLESHEET)
 
         self._bgr_image: np.ndarray | None = None
-        self._current_roi: QRect | None = None
+        self._current_roi: RotatedRoi | None = None
 
         self._build_ui()
         self._build_menu()
@@ -306,6 +307,25 @@ class MainWindow(QMainWindow):
             self.btn_clear,
         ):
             pl.addWidget(btn)
+
+        pl.addSpacing(4)
+
+        # ── Threshold row ─────────────────────────────────────────────
+        thr_row = QHBoxLayout()
+        thr_row.setSpacing(8)
+        thr_lbl = QLabel("二值化阈值")
+        thr_lbl.setStyleSheet(f"color: {_TEXT_MUTED}; font-size: 12px;")
+        thr_row.addWidget(thr_lbl)
+        self.thr_auto = QCheckBox("自动")
+        self.thr_auto.setChecked(True)
+        self.thr_auto.setStyleSheet(f"color: {_TEXT_MUTED}; font-size: 12px;")
+        thr_row.addWidget(self.thr_auto)
+        self.thr_input = QLineEdit("127")
+        self.thr_input.setPlaceholderText("0–255")
+        self.thr_input.setEnabled(False)
+        thr_row.addWidget(self.thr_input)
+        self.thr_auto.toggled.connect(lambda checked: self.thr_input.setEnabled(not checked))
+        pl.addLayout(thr_row)
 
         pl.addSpacing(4)
 
@@ -507,32 +527,70 @@ class MainWindow(QMainWindow):
         self._update_image_info()
         self.statusBar().showMessage(f"已加载: {path}  ({w} × {h})")
 
-    def _on_roi_selected(self, roi: QRect):
+    def _on_roi_selected(self, roi: RotatedRoi):
         self._current_roi = roi
         self.btn_detect.setEnabled(True)
         self.btn_clear.setEnabled(True)
+        self.image_view.clear_detected_ellipses()
         self.statusBar().showMessage(
-            f"ROI: ({roi.x()}, {roi.y()})  {roi.width()} × {roi.height()} px  —  点击「检测椭圆」"
+            f"ROI center=({roi.center_x:.1f}, {roi.center_y:.1f}) "
+            f"size={roi.width:.1f} x {roi.height:.1f} px "
+            f"angle={roi.angle_deg:.1f} deg"
         )
 
     def _detect(self):
         if self._bgr_image is None or self._current_roi is None:
             return
-        roi = self._current_roi
-        x, y, w, h = roi.x(), roi.y(), roi.width(), roi.height()
-        ih, iw = self._bgr_image.shape[:2]
-        x = max(0, x); y = max(0, y)
-        w = min(w, iw - x); h = min(h, ih - y)
-        if w <= 0 or h <= 0:
-            self.statusBar().showMessage("ROI 超出图像范围")
+        crop = self._extract_rotated_roi(self._current_roi)
+        if crop is None or crop.size == 0:
+            self.statusBar().showMessage("ROI is invalid or outside the image")
             return
-        crop = self._bgr_image[y:y+h, x:x+w]
         gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
-        ellipses = detect_ellipses(gray)
+        if self.thr_auto.isChecked():
+            thr = None
+        else:
+            try:
+                thr = max(0, min(255, int(self.thr_input.text().strip())))
+            except ValueError:
+                thr = None
+        ellipses = detect_ellipses(gray, threshold=thr)
         self._clear_results()
+        self.image_view.clear_detected_ellipses()
         if not ellipses:
             self.statusBar().showMessage("未检测到椭圆，请调整 ROI 或检查图像")
             return
+
+        roi = self._current_roi
+        a = math.radians(roi.angle_deg)
+        cos_a = math.cos(a)
+        sin_a = math.sin(a)
+        ellipses_in_image = []
+        for e in ellipses:
+            cx_crop, cy_crop = e['center']
+            dx = cx_crop - roi.width / 2.0
+            dy = cy_crop - roi.height / 2.0
+            orig_cx = roi.center_x + dx * cos_a - dy * sin_a
+            orig_cy = roi.center_y + dx * sin_a + dy * cos_a
+
+            contour_image = []
+            for pt in e['contour']:
+                pdx = float(pt[0]) - roi.width / 2.0
+                pdy = float(pt[1]) - roi.height / 2.0
+                contour_image.append((
+                    roi.center_x + pdx * cos_a - pdy * sin_a,
+                    roi.center_y + pdx * sin_a + pdy * cos_a,
+                ))
+
+            ellipses_in_image.append({
+                'center_x': orig_cx,
+                'center_y': orig_cy,
+                'x_axis': e['x_axis'],
+                'y_axis': e['y_axis'],
+                'angle_deg': e['angle'] + roi.angle_deg,
+                'contour_points': contour_image,
+            })
+        self.image_view.set_detected_ellipses(ellipses_in_image)
+
         self.table.setRowCount(len(ellipses))
         ratios = []
         for i, e in enumerate(ellipses):
@@ -546,9 +604,8 @@ class MainWindow(QMainWindow):
         self.avg_label.setText(f"{avg:.4f}")
         self.lbl_mult.setText(str(mult))
         self.lbl_post_div.setText(str(post_div))
-        self.statusBar().showMessage(
-            f"检测到 {len(ellipses)} 个椭圆    平均 Y/X: {avg:.4f}    乘法器 {mult}  后分配器 {post_div}"
-        )
+        msg = f"检测到 {len(ellipses)} 个椭圆    平均 Y/X: {avg:.4f}    乘法器 {mult}  后分配器 {post_div}"
+        self.statusBar().showMessage(msg)
 
     def _on_exposure_changed(self, text: str):
         text = text.strip()
@@ -574,7 +631,7 @@ class MainWindow(QMainWindow):
     def _rotate_image(self, clockwise: bool):
         if self._bgr_image is None:
             return
-
+        direction = "右旋转" if clockwise else "左旋转"
         rotate_flag = (
             cv2.ROTATE_90_CLOCKWISE if clockwise else cv2.ROTATE_90_COUNTERCLOCKWISE
         )
@@ -585,7 +642,6 @@ class MainWindow(QMainWindow):
         self.btn_clear.setEnabled(False)
         self._clear_results()
         self._update_image_info()
-        direction = "右旋转" if clockwise else "左旋转"
         h, w = self._bgr_image.shape[:2]
         self.statusBar().showMessage(f"图片已{direction}，当前尺寸 {w} x {h}")
 
@@ -617,6 +673,28 @@ class MainWindow(QMainWindow):
     @staticmethod
     def _is_ascii_path(path: str) -> bool:
         return path.isascii()
+
+    def _extract_rotated_roi(self, roi: RotatedRoi) -> np.ndarray | None:
+        if self._bgr_image is None:
+            return None
+
+        width = max(1, int(round(roi.width)))
+        height = max(1, int(round(roi.height)))
+        center = (float(roi.center_x), float(roi.center_y))
+
+        image_h, image_w = self._bgr_image.shape[:2]
+        if not (0.0 <= center[0] <= image_w and 0.0 <= center[1] <= image_h):
+            return None
+
+        rotate_mat = cv2.getRotationMatrix2D(center, -roi.angle_deg, 1.0)
+        rotated = cv2.warpAffine(
+            self._bgr_image,
+            rotate_mat,
+            (image_w, image_h),
+            flags=cv2.INTER_LINEAR,
+            borderMode=cv2.BORDER_REPLICATE,
+        )
+        return cv2.getRectSubPix(rotated, (width, height), center)
 
     @staticmethod
     def _cell(text: str) -> QTableWidgetItem:
