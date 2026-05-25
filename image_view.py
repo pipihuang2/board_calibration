@@ -443,8 +443,8 @@ class ImageView(QWidget):
         painter.setBrush(Qt.BrushStyle.NoBrush)
         for e in self._detected_ellipses:
             center = self._image_point_to_widget_point(QPointF(e['center_x'], e['center_y']))
-            rx = e['x_axis'] / 2.0 * scale
-            ry = e['y_axis'] / 2.0 * scale
+            ry = max(e['x_axis'], e['y_axis']) / 2.0 * scale
+            rx = min(e['x_axis'], e['y_axis']) / 2.0 * scale
             painter.save()
             painter.translate(center.x(), center.y())
             painter.rotate(e['angle_deg'])

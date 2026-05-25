@@ -2,8 +2,6 @@ from __future__ import annotations
 import cv2
 import math
 import numpy as np
-from fractions import Fraction
-
 
 def best_fraction(ratio: float,
                   max_num: int = 128,   # 后分配器上限
@@ -686,7 +684,7 @@ class MainWindow(QMainWindow):
         if not (0.0 <= center[0] <= image_w and 0.0 <= center[1] <= image_h):
             return None
 
-        rotate_mat = cv2.getRotationMatrix2D(center, -roi.angle_deg, 1.0)
+        rotate_mat = cv2.getRotationMatrix2D(center, roi.angle_deg, 1.0)
         rotated = cv2.warpAffine(
             self._bgr_image,
             rotate_mat,
