@@ -473,6 +473,56 @@ class MainWindow(QMainWindow):
 
         pl.addWidget(cam_card)
 
+        pl.addSpacing(2)
+
+        # ── Scale card ────────────────────────────────────────────────
+        scale_card = QFrame()
+        scale_card.setObjectName("metric_card")
+        sl = QVBoxLayout(scale_card)
+        sl.setContentsMargins(14, 10, 14, 12)
+        sl.setSpacing(6)
+
+        scale_hdr = QLabel("比例尺".upper())
+        scale_hdr.setObjectName("section_label")
+        sl.addWidget(scale_hdr)
+
+        # Real circle diameter input
+        diam_row = QHBoxLayout()
+        diam_row.setSpacing(8)
+        diam_lbl = QLabel("圆实际直径")
+        diam_lbl.setStyleSheet(f"color: {_TEXT_MUTED}; font-size: 12px;")
+        diam_row.addWidget(diam_lbl)
+        self.circle_diam_input = QLineEdit()
+        self.circle_diam_input.setPlaceholderText("mm")
+        self.circle_diam_input.textChanged.connect(self._on_scale_input_changed)
+        diam_row.addWidget(self.circle_diam_input)
+        sl.addLayout(diam_row)
+
+        inner_sep2 = QFrame()
+        inner_sep2.setFrameShape(QFrame.Shape.HLine)
+        inner_sep2.setStyleSheet(f"color: {_BORDER};")
+        sl.addWidget(inner_sep2)
+
+        def _scale_row(label_text):
+            row = QHBoxLayout()
+            row.setSpacing(0)
+            key = QLabel(label_text)
+            key.setStyleSheet(f"color: {_TEXT_MUTED}; font-size: 12px;")
+            val = QLabel("—")
+            val.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            val.setStyleSheet(f"color: {_GREEN}; font-size: 12px; font-weight: 600;")
+            row.addWidget(key)
+            row.addStretch()
+            row.addWidget(val)
+            return row, val
+
+        row_sx, self.lbl_scale_x = _scale_row("X 方向")
+        row_sy, self.lbl_scale_y = _scale_row("Y 方向")
+        sl.addLayout(row_sx)
+        sl.addLayout(row_sy)
+
+        pl.addWidget(scale_card)
+
         root.addWidget(panel)
 
         self.statusBar().showMessage("就绪 — 请打开图片")
@@ -605,6 +655,46 @@ class MainWindow(QMainWindow):
         msg = f"检测到 {len(ellipses)} 个椭圆    平均 Y/X: {avg:.4f}    乘法器 {mult}  后分配器 {post_div}"
         self.statusBar().showMessage(msg)
 
+        avg_x = float(np.mean([e['x_axis'] for e in ellipses]))
+        avg_y = float(np.mean([e['y_axis'] for e in ellipses]))
+        self._update_scale(avg_x, avg_y)
+
+    def _update_scale(self, avg_x_px: float, avg_y_px: float):
+        text = self.circle_diam_input.text().strip()
+        if not text:
+            self.lbl_scale_x.setText("—")
+            self.lbl_scale_y.setText("—")
+            return
+        try:
+            real_mm = float(text)
+            if real_mm <= 0:
+                raise ValueError
+        except ValueError:
+            self.lbl_scale_x.setText("—")
+            self.lbl_scale_y.setText("—")
+            return
+        sx = real_mm / avg_x_px
+        sy = real_mm / avg_y_px
+        self.lbl_scale_x.setText(f"{sx:.4f} mm/px")
+        self.lbl_scale_y.setText(f"{sy:.4f} mm/px")
+
+    def _on_scale_input_changed(self, _text: str):
+        # Re-read table to recalculate scale without re-detecting
+        rows = self.table.rowCount()
+        if rows == 0:
+            self.lbl_scale_x.setText("—")
+            self.lbl_scale_y.setText("—")
+            return
+        x_vals, y_vals = [], []
+        for i in range(rows):
+            try:
+                x_vals.append(float(self.table.item(i, 1).text()))
+                y_vals.append(float(self.table.item(i, 2).text()))
+            except (AttributeError, ValueError):
+                pass
+        if x_vals and y_vals:
+            self._update_scale(float(np.mean(x_vals)), float(np.mean(y_vals)))
+
     def _on_exposure_changed(self, text: str):
         text = text.strip()
         if not text:
@@ -657,6 +747,8 @@ class MainWindow(QMainWindow):
         self.avg_label.setText("—")
         self.lbl_mult.setText("—")
         self.lbl_post_div.setText("—")
+        self.lbl_scale_x.setText("—")
+        self.lbl_scale_y.setText("—")
 
     def _update_image_info(self):
         if self._bgr_image is None:
