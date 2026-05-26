@@ -594,6 +594,7 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("ROI is invalid or outside the image")
             return
         gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+        crop_h, crop_w = gray.shape[:2]
         if self.thr_auto.isChecked():
             thr = None
         else:
@@ -612,18 +613,22 @@ class MainWindow(QMainWindow):
         a = math.radians(roi.angle_deg)
         cos_a = math.cos(a)
         sin_a = math.sin(a)
+        # getRectSubPix returns an integer-sized patch whose source-space center
+        # lands at ((w - 1) / 2, (h - 1) / 2) in crop coordinates.
+        crop_center_x = (crop_w - 1) / 2.0
+        crop_center_y = (crop_h - 1) / 2.0
         ellipses_in_image = []
         for e in ellipses:
             cx_crop, cy_crop = e['center']
-            dx = cx_crop - roi.width / 2.0
-            dy = cy_crop - roi.height / 2.0
+            dx = cx_crop - crop_center_x
+            dy = cy_crop - crop_center_y
             orig_cx = roi.center_x + dx * cos_a - dy * sin_a
             orig_cy = roi.center_y + dx * sin_a + dy * cos_a
 
             contour_image = []
             for pt in e['contour']:
-                pdx = float(pt[0]) - roi.width / 2.0
-                pdy = float(pt[1]) - roi.height / 2.0
+                pdx = float(pt[0]) - crop_center_x
+                pdy = float(pt[1]) - crop_center_y
                 contour_image.append((
                     roi.center_x + pdx * cos_a - pdy * sin_a,
                     roi.center_y + pdx * sin_a + pdy * cos_a,
