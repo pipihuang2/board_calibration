@@ -276,7 +276,7 @@ class MainWindow(QMainWindow):
         pl.addWidget(app_sub)
         pl.addSpacing(6)
 
-        # Buttons
+        # ── Buttons ───────────────────────────────────────────────────
         self.btn_open = QPushButton("打开图片")
         self.btn_open.clicked.connect(self._open_image)
 
@@ -292,26 +292,38 @@ class MainWindow(QMainWindow):
         self.btn_detect.setEnabled(False)
         self.btn_detect.clicked.connect(self._detect)
 
-        self.btn_clear = QPushButton("清除 ROI")
+        self.btn_clear = QPushButton("清除")
         self.btn_clear.setObjectName("btn_clear")
         self.btn_clear.setEnabled(False)
         self.btn_clear.clicked.connect(self._clear_roi)
 
-        for btn in (
-            self.btn_open,
-            self.btn_rotate_left,
-            self.btn_rotate_right,
-            self.btn_detect,
-            self.btn_clear,
-        ):
-            pl.addWidget(btn)
+        pl.addWidget(self.btn_open)
 
-        pl.addSpacing(4)
+        rot_row = QHBoxLayout()
+        rot_row.setSpacing(8)
+        rot_row.addWidget(self.btn_rotate_left)
+        rot_row.addWidget(self.btn_rotate_right)
+        pl.addLayout(rot_row)
 
-        # ── Threshold row ─────────────────────────────────────────────
+        det_row = QHBoxLayout()
+        det_row.setSpacing(8)
+        det_row.addWidget(self.btn_detect)
+        det_row.addWidget(self.btn_clear)
+        pl.addLayout(det_row)
+
+        pl.addSpacing(6)
+
+        # ── 参数输入 card (二值化 + 曝光 + 圆直径) ────────────────────
+        input_card = QFrame()
+        input_card.setObjectName("metric_card")
+        in_lay = QVBoxLayout(input_card)
+        in_lay.setContentsMargins(14, 10, 14, 12)
+        in_lay.setSpacing(6)
+        in_lay.addWidget(_section_label("参数输入"))
+
         thr_row = QHBoxLayout()
         thr_row.setSpacing(8)
-        thr_lbl = QLabel("二值化阈值")
+        thr_lbl = QLabel("二值化")
         thr_lbl.setStyleSheet(f"color: {_TEXT_MUTED}; font-size: 12px;")
         thr_row.addWidget(thr_lbl)
         self.thr_auto = QCheckBox("自动")
@@ -323,36 +335,59 @@ class MainWindow(QMainWindow):
         self.thr_input.setEnabled(False)
         thr_row.addWidget(self.thr_input)
         self.thr_auto.toggled.connect(lambda checked: self.thr_input.setEnabled(not checked))
-        pl.addLayout(thr_row)
+        in_lay.addLayout(thr_row)
 
+        exp_row = QHBoxLayout()
+        exp_row.setSpacing(8)
+        exp_lbl = QLabel("曝光时间")
+        exp_lbl.setStyleSheet(f"color: {_TEXT_MUTED}; font-size: 12px;")
+        exp_row.addWidget(exp_lbl)
+        self.exp_input = QLineEdit()
+        self.exp_input.setPlaceholderText("μs")
+        self.exp_input.textChanged.connect(self._on_exposure_changed)
+        exp_row.addWidget(self.exp_input)
+        in_lay.addLayout(exp_row)
+
+        diam_row = QHBoxLayout()
+        diam_row.setSpacing(8)
+        diam_lbl = QLabel("圆直径")
+        diam_lbl.setStyleSheet(f"color: {_TEXT_MUTED}; font-size: 12px;")
+        diam_row.addWidget(diam_lbl)
+        self.circle_diam_input = QLineEdit()
+        self.circle_diam_input.setPlaceholderText("mm")
+        self.circle_diam_input.textChanged.connect(self._on_scale_input_changed)
+        diam_row.addWidget(self.circle_diam_input)
+        in_lay.addLayout(diam_row)
+
+        pl.addWidget(input_card)
         pl.addSpacing(4)
 
-        # ── Image info card ───────────────────────────────────────────
+        # ── Image info card (compact, single row) ─────────────────────
         img_card = QFrame()
         img_card.setObjectName("metric_card")
         ic_lay = QVBoxLayout(img_card)
-        ic_lay.setContentsMargins(14, 10, 14, 10)
-        ic_lay.setSpacing(6)
-
+        ic_lay.setContentsMargins(14, 8, 14, 8)
+        ic_lay.setSpacing(4)
         ic_lay.addWidget(_section_label("图像信息"))
 
-        def _info_row(label_text):
-            row = QHBoxLayout()
-            row.setSpacing(0)
-            key = QLabel(label_text)
-            key.setStyleSheet(f"color: {_TEXT_MUTED}; font-size: 12px;")
-            val = QLabel("—")
-            val.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            val.setStyleSheet(f"color: {_TEXT}; font-size: 12px; font-weight: 600;")
-            row.addWidget(key)
-            row.addStretch()
-            row.addWidget(val)
-            return row, val
-
-        row_x, self.lbl_img_x = _info_row("X 方向（运动）")
-        row_y, self.lbl_img_y = _info_row("Y 方向（拍摄）")
-        ic_lay.addLayout(row_x)
-        ic_lay.addLayout(row_y)
+        info_row = QHBoxLayout()
+        info_row.setSpacing(6)
+        x_key = QLabel("X")
+        x_key.setStyleSheet(f"color: {_TEXT_MUTED}; font-size: 11px;")
+        self.lbl_img_x = QLabel("—")
+        self.lbl_img_x.setStyleSheet(f"color: {_TEXT}; font-size: 12px; font-weight: 600;")
+        y_key = QLabel("Y")
+        y_key.setStyleSheet(f"color: {_TEXT_MUTED}; font-size: 11px;")
+        self.lbl_img_y = QLabel("—")
+        self.lbl_img_y.setStyleSheet(f"color: {_TEXT}; font-size: 12px; font-weight: 600;")
+        info_row.addStretch()
+        info_row.addWidget(x_key)
+        info_row.addWidget(self.lbl_img_x)
+        info_row.addSpacing(20)
+        info_row.addWidget(y_key)
+        info_row.addWidget(self.lbl_img_y)
+        info_row.addStretch()
+        ic_lay.addLayout(info_row)
         pl.addWidget(img_card)
 
         pl.addSpacing(4)
@@ -368,48 +403,26 @@ class MainWindow(QMainWindow):
         self.table.setAlternatingRowColors(True)
         self.table.verticalHeader().setVisible(False)
         self.table.setShowGrid(False)
-        self.table.setMinimumHeight(160)
+        self.table.setMinimumHeight(140)
         pl.addWidget(self.table, stretch=1)
 
         pl.addSpacing(4)
 
-        # ── Avg ratio card ────────────────────────────────────────────
-        avg_card = QFrame()
-        avg_card.setObjectName("metric_card")
-        avg_lay = QVBoxLayout(avg_card)
-        avg_lay.setContentsMargins(14, 10, 14, 12)
-        avg_lay.setSpacing(6)
+        # ── 测量结果 combined card ────────────────────────────────────
+        result_card = QFrame()
+        result_card.setObjectName("metric_card")
+        rl = QVBoxLayout(result_card)
+        rl.setContentsMargins(14, 10, 14, 12)
+        rl.setSpacing(6)
 
-        avg_hdr = QLabel("平均 Y / X 比值".upper())
-        avg_hdr.setObjectName("section_label")
-        avg_hdr.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        avg_lay.addWidget(avg_hdr)
-
-        self.avg_label = QLabel("—")
-        f1 = QFont(); f1.setPointSize(20); f1.setBold(True)
-        self.avg_label.setFont(f1)
-        self.avg_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.avg_label.setStyleSheet(f"color: {_ACCENT};")
-        avg_lay.addWidget(self.avg_label)
-
-        # Divider inside card
-        inner_sep = QFrame()
-        inner_sep.setFrameShape(QFrame.Shape.HLine)
-        inner_sep.setStyleSheet(f"color: {_BORDER};")
-        avg_lay.addWidget(inner_sep)
-
-        # Two-column: 乘法器 | 后分配器
-        cols = QHBoxLayout()
-        cols.setSpacing(0)
-
-        def _param_col(title: str) -> tuple[QVBoxLayout, QLabel]:
+        def _param_col(title: str, color: str = _TEXT, font_size: int = 18):
             col = QVBoxLayout()
             col.setSpacing(2)
             val_lbl = QLabel("—")
-            fv = QFont(); fv.setPointSize(20); fv.setBold(True)
+            fv = QFont(); fv.setPointSize(font_size); fv.setBold(True)
             val_lbl.setFont(fv)
             val_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            val_lbl.setStyleSheet(f"color: {_TEXT};")
+            val_lbl.setStyleSheet(f"color: {color};")
             ttl_lbl = QLabel(title)
             ttl_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             ttl_lbl.setObjectName("section_label")
@@ -417,111 +430,84 @@ class MainWindow(QMainWindow):
             col.addWidget(ttl_lbl)
             return col, val_lbl
 
+        # 平均 Y / X
+        avg_hdr = QLabel("平均 Y / X 比值".upper())
+        avg_hdr.setObjectName("section_label")
+        avg_hdr.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        rl.addWidget(avg_hdr)
+
+        self.avg_label = QLabel("—")
+        f1 = QFont(); f1.setPointSize(20); f1.setBold(True)
+        self.avg_label.setFont(f1)
+        self.avg_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.avg_label.setStyleSheet(f"color: {_ACCENT};")
+        rl.addWidget(self.avg_label)
+
+        sep1 = QFrame()
+        sep1.setFrameShape(QFrame.Shape.HLine)
+        sep1.setStyleSheet(f"color: {_BORDER};")
+        rl.addWidget(sep1)
+
+        # 乘法器 | 后分配器
+        cols = QHBoxLayout()
+        cols.setSpacing(0)
         col_mult, self.lbl_mult     = _param_col("乘法器")
         col_post, self.lbl_post_div = _param_col("后分配器")
-
-        # Vertical divider between columns
         vdiv = QFrame()
         vdiv.setFrameShape(QFrame.Shape.VLine)
         vdiv.setStyleSheet(f"color: {_BORDER};")
-
         cols.addLayout(col_mult)
         cols.addWidget(vdiv)
         cols.addLayout(col_post)
-        avg_lay.addLayout(cols)
+        rl.addLayout(cols)
 
-        pl.addWidget(avg_card)
+        sep2 = QFrame()
+        sep2.setFrameShape(QFrame.Shape.HLine)
+        sep2.setStyleSheet(f"color: {_BORDER};")
+        rl.addWidget(sep2)
 
-        pl.addSpacing(2)
-
-        # ── Camera params card ────────────────────────────────────────
-        cam_card = QFrame()
-        cam_card.setObjectName("metric_card")
-        cl = QVBoxLayout(cam_card)
-        cl.setContentsMargins(14, 10, 14, 12)
-        cl.setSpacing(6)
-
-        cam_hdr = QLabel("相机参数".upper())
-        cam_hdr.setObjectName("section_label")
-        cl.addWidget(cam_hdr)
-
-        # Exposure row
-        exp_row = QHBoxLayout()
-        exp_row.setSpacing(8)
-        exp_lbl = QLabel("曝光时间")
-        exp_lbl.setStyleSheet(f"color: {_TEXT_MUTED}; font-size: 12px;")
-        exp_row.addWidget(exp_lbl)
-        self.exp_input = QLineEdit()
-        self.exp_input.setPlaceholderText("μs")
-        self.exp_input.textChanged.connect(self._on_exposure_changed)
-        exp_row.addWidget(self.exp_input)
-        cl.addLayout(exp_row)
-
+        # 最大采集频率
         freq_hdr = QLabel("最大采集频率".upper())
         freq_hdr.setObjectName("section_label")
         freq_hdr.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        cl.addWidget(freq_hdr)
+        rl.addWidget(freq_hdr)
 
         self.freq_label = QLabel("—")
-        f2 = QFont()
-        f2.setPointSize(20)
-        f2.setBold(True)
+        f2 = QFont(); f2.setPointSize(18); f2.setBold(True)
         self.freq_label.setFont(f2)
         self.freq_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.freq_label.setStyleSheet(f"color: {_GREEN};")
-        cl.addWidget(self.freq_label)
+        rl.addWidget(self.freq_label)
 
-        pl.addWidget(cam_card)
+        sep3 = QFrame()
+        sep3.setFrameShape(QFrame.Shape.HLine)
+        sep3.setStyleSheet(f"color: {_BORDER};")
+        rl.addWidget(sep3)
 
-        pl.addSpacing(2)
-
-        # ── Scale card ────────────────────────────────────────────────
-        scale_card = QFrame()
-        scale_card.setObjectName("metric_card")
-        sl = QVBoxLayout(scale_card)
-        sl.setContentsMargins(14, 10, 14, 12)
-        sl.setSpacing(6)
-
+        # 比例尺
         scale_hdr = QLabel("比例尺".upper())
         scale_hdr.setObjectName("section_label")
-        sl.addWidget(scale_hdr)
+        scale_hdr.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        rl.addWidget(scale_hdr)
 
-        # Real circle diameter input
-        diam_row = QHBoxLayout()
-        diam_row.setSpacing(8)
-        diam_lbl = QLabel("圆实际直径")
-        diam_lbl.setStyleSheet(f"color: {_TEXT_MUTED}; font-size: 12px;")
-        diam_row.addWidget(diam_lbl)
-        self.circle_diam_input = QLineEdit()
-        self.circle_diam_input.setPlaceholderText("mm")
-        self.circle_diam_input.textChanged.connect(self._on_scale_input_changed)
-        diam_row.addWidget(self.circle_diam_input)
-        sl.addLayout(diam_row)
+        scale_cols = QHBoxLayout()
+        scale_cols.setSpacing(0)
+        col_sx, self.lbl_scale_x = _param_col("X 方向", color=_GREEN, font_size=14)
+        col_sy, self.lbl_scale_y = _param_col("Y 方向", color=_GREEN, font_size=14)
+        vdiv2 = QFrame()
+        vdiv2.setFrameShape(QFrame.Shape.VLine)
+        vdiv2.setStyleSheet(f"color: {_BORDER};")
+        scale_cols.addLayout(col_sx)
+        scale_cols.addWidget(vdiv2)
+        scale_cols.addLayout(col_sy)
+        rl.addLayout(scale_cols)
 
-        inner_sep2 = QFrame()
-        inner_sep2.setFrameShape(QFrame.Shape.HLine)
-        inner_sep2.setStyleSheet(f"color: {_BORDER};")
-        sl.addWidget(inner_sep2)
+        unit_lbl = QLabel("mm/px")
+        unit_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        unit_lbl.setStyleSheet(f"color: {_TEXT_MUTED}; font-size: 10px; font-weight: 600; letter-spacing: 1px;")
+        rl.addWidget(unit_lbl)
 
-        def _scale_row(label_text):
-            row = QHBoxLayout()
-            row.setSpacing(0)
-            key = QLabel(label_text)
-            key.setStyleSheet(f"color: {_TEXT_MUTED}; font-size: 12px;")
-            val = QLabel("—")
-            val.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            val.setStyleSheet(f"color: {_GREEN}; font-size: 12px; font-weight: 600;")
-            row.addWidget(key)
-            row.addStretch()
-            row.addWidget(val)
-            return row, val
-
-        row_sx, self.lbl_scale_x = _scale_row("X 方向")
-        row_sy, self.lbl_scale_y = _scale_row("Y 方向")
-        sl.addLayout(row_sx)
-        sl.addLayout(row_sy)
-
-        pl.addWidget(scale_card)
+        pl.addWidget(result_card)
 
         root.addWidget(panel)
 
@@ -680,8 +666,8 @@ class MainWindow(QMainWindow):
             return
         sx = real_mm / avg_x_px
         sy = real_mm / avg_y_px
-        self.lbl_scale_x.setText(f"{sx:.4f} mm/px")
-        self.lbl_scale_y.setText(f"{sy:.4f} mm/px")
+        self.lbl_scale_x.setText(f"{sx:.4f}")
+        self.lbl_scale_y.setText(f"{sy:.4f}")
 
     def _on_scale_input_changed(self, _text: str):
         # Re-read table to recalculate scale without re-detecting
