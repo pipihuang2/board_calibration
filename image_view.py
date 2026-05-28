@@ -438,10 +438,13 @@ class ImageView(QWidget):
                 ])
                 painter.drawPoints(poly)
 
-        # 2. 拟合椭圆轮廓（绿色）
+        # 2. 拟合椭圆轮廓（绿色）+ 编号
         painter.setPen(QPen(QColor(0, 255, 0), 2, Qt.PenStyle.SolidLine))
         painter.setBrush(Qt.BrushStyle.NoBrush)
-        for e in self._detected_ellipses:
+        label_font = QFont()
+        label_font.setPointSize(9)
+        label_font.setBold(True)
+        for idx, e in enumerate(self._detected_ellipses):
             center = self._image_point_to_widget_point(QPointF(e['center_x'], e['center_y']))
             ry = max(e['x_axis'], e['y_axis']) / 2.0 * scale
             rx = min(e['x_axis'], e['y_axis']) / 2.0 * scale
@@ -450,6 +453,21 @@ class ImageView(QWidget):
             painter.rotate(e['angle_deg'])
             painter.drawEllipse(QRectF(-rx, -ry, 2 * rx, 2 * ry))
             painter.restore()
+
+            # 在中心绘制编号
+            label = str(idx + 1)
+            painter.setFont(label_font)
+            fm = painter.fontMetrics()
+            tw = fm.horizontalAdvance(label)
+            th = fm.ascent()
+            lx = center.x() - tw / 2
+            ly = center.y() + th / 2
+            painter.setPen(QColor(0, 0, 0))
+            for dx, dy in ((-1, -1), (1, -1), (-1, 1), (1, 1)):
+                painter.drawText(QPointF(lx + dx, ly + dy), label)
+            painter.setPen(QColor(255, 255, 0))
+            painter.drawText(QPointF(lx, ly), label)
+            painter.setPen(QPen(QColor(0, 255, 0), 2, Qt.PenStyle.SolidLine))
 
     # ------------------------------------------------------------------ #
     # Hit testing and cursor
