@@ -22,7 +22,8 @@ class RotatedRoi:
 
 
 class ImageView(QWidget):
-    roi_selected = pyqtSignal(object)  # emits RotatedRoi in image coordinates
+    roi_selected = pyqtSignal(object)           # emits RotatedRoi in image coordinates
+    mouse_pos_changed = pyqtSignal(float, float)  # image-space (x, y); (-1,-1) = off image
 
     _HANDLE_RADIUS = 6.0
     _ROTATE_HANDLE_DISTANCE = 26.0
@@ -147,6 +148,11 @@ class ImageView(QWidget):
         pos_widget = event.position()
         pos_image = self._widget_point_to_image_point(pos_widget)
 
+        if self._point_in_image(event.pos()):
+            self.mouse_pos_changed.emit(pos_image.x(), pos_image.y())
+        else:
+            self.mouse_pos_changed.emit(-1.0, -1.0)
+
         if self._drawing:
             self._end_widget = self._clamp_point_to_image(event.pos())
             self.update()
@@ -188,6 +194,7 @@ class ImageView(QWidget):
         self._update_cursor(event.position())
 
     def leaveEvent(self, event):
+        self.mouse_pos_changed.emit(-1.0, -1.0)
         self._update_cursor()
         super().leaveEvent(event)
 

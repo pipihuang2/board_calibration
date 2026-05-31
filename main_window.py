@@ -24,10 +24,12 @@ from PyQt6.QtWidgets import (
     QPushButton, QLabel, QTableWidget, QTableWidgetItem,
     QFileDialog, QHeaderView, QFrame, QGraphicsDropShadowEffect,
     QLineEdit, QSizePolicy, QMessageBox, QCheckBox,
+    QComboBox, QStackedWidget,
 )
 
 from image_view import ImageView, RotatedRoi
 from ellipse_detector import detect_ellipses
+from point_picker_view import PointPickerView
 
 # ── Palette ────────────────────────────────────────────────────────────────
 _IMG_BG      = "#EAECF0"   # image area background
@@ -121,6 +123,9 @@ QTableWidget {{
 }}
 QTableWidget::item {{ padding: 4px 0; color: {_TEXT}; }}
 QTableWidget::item:alternate {{ background: #253044; }}
+QTableWidget::item:hover {{ background: rgba(59,130,246,0.15); }}
+QTableWidget::item:selected {{ background: rgba(59,130,246,0.45); color: {_TEXT}; }}
+QTableWidget::item:alternate:selected {{ background: rgba(59,130,246,0.45); color: {_TEXT}; }}
 QHeaderView::section {{
     background: {_CARD2};
     color: {_TEXT_MUTED};
@@ -162,6 +167,28 @@ QLineEdit:focus {{
     border-color: {_ACCENT};
     background: {_CARD};
 }}
+
+/* ── Combo box ────────────────────────────────────── */
+QComboBox {{
+    background: {_CARD};
+    color: {_TEXT};
+    border: 1.5px solid {_BORDER_CARD};
+    border-radius: 10px;
+    padding: 4px 12px;
+    font-size: 13px;
+    min-height: 34px;
+    max-height: 34px;
+}}
+QComboBox:hover {{ border-color: {_ACCENT}; }}
+QComboBox::drop-down {{ border: none; width: 20px; }}
+QComboBox QAbstractItemView {{
+    background: {_CARD};
+    color: {_TEXT};
+    border: 1px solid {_BORDER_CARD};
+    selection-background-color: rgba(59,130,246,0.25);
+    outline: none;
+}}
+QStackedWidget {{ background: transparent; }}
 
 /* ── Status bar ───────────────────────────────────── */
 QStatusBar {{
@@ -232,6 +259,8 @@ class MainWindow(QMainWindow):
 
         self._bgr_image: np.ndarray | None = None
         self._current_roi: RotatedRoi | None = None
+        self._updating_point_table = False
+        self._real_coords_by_id: dict[int, tuple[float, float]] = {}
 
         self._build_ui()
         self._build_menu()
@@ -246,16 +275,29 @@ class MainWindow(QMainWindow):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        # ── Left: image view ──────────────────────────────────────────
+        # ── Left: mode-switched image views ──────────────────────────
+        self.left_stack = QStackedWidget()
+        root.addWidget(self.left_stack, stretch=1)
+
+        # left page 0: ellipse detection view
         img_wrap = QWidget()
         img_wrap.setObjectName("central")
         img_lay = QVBoxLayout(img_wrap)
         img_lay.setContentsMargins(16, 14, 12, 14)
-
         self.image_view = ImageView()
         self.image_view.roi_selected.connect(self._on_roi_selected)
         img_lay.addWidget(self.image_view)
-        root.addWidget(img_wrap, stretch=1)
+        self.left_stack.addWidget(img_wrap)
+
+        # left page 1: point picker view
+        pp_wrap = QWidget()
+        pp_wrap.setObjectName("central")
+        pp_lay = QVBoxLayout(pp_wrap)
+        pp_lay.setContentsMargins(16, 14, 12, 14)
+        self.point_picker_view = PointPickerView()
+        self.point_picker_view.points_changed.connect(self._on_points_changed)
+        pp_lay.addWidget(self.point_picker_view)
+        self.left_stack.addWidget(pp_wrap)
 
         # ── Right: dark sidebar ───────────────────────────────────────
         panel = QFrame()
@@ -267,16 +309,16 @@ class MainWindow(QMainWindow):
         pl.setContentsMargins(16, 18, 16, 16)
         pl.setSpacing(8)
 
-        # App title area
+        # App title
         app_title = QLabel("标定分析")
         app_title.setStyleSheet(f"color: {_TEXT}; font-size: 16px; font-weight: 700;")
         app_sub = QLabel("线扫相机椭圆检测工具")
         app_sub.setStyleSheet(f"color: {_TEXT_MUTED}; font-size: 10px;")
         pl.addWidget(app_title)
         pl.addWidget(app_sub)
-        pl.addSpacing(6)
+        pl.addSpacing(4)
 
-        # ── Buttons ───────────────────────────────────────────────────
+        # ── Common buttons (all modes) ────────────────────────────────
         self.btn_open = QPushButton("打开图片")
         self.btn_open.clicked.connect(self._open_image)
 
@@ -288,6 +330,42 @@ class MainWindow(QMainWindow):
         self.btn_rotate_right.setEnabled(False)
         self.btn_rotate_right.clicked.connect(self._rotate_right)
 
+        pl.addWidget(self.btn_open)
+        rot_row = QHBoxLayout()
+        rot_row.setSpacing(8)
+        rot_row.addWidget(self.btn_rotate_left)
+        rot_row.addWidget(self.btn_rotate_right)
+        pl.addLayout(rot_row)
+
+        # ── Mode selector ─────────────────────────────────────────────
+        sep_top = QFrame()
+        sep_top.setFrameShape(QFrame.Shape.HLine)
+        sep_top.setStyleSheet(f"color: {_BORDER};")
+        pl.addWidget(sep_top)
+
+        mode_row = QHBoxLayout()
+        mode_row.setSpacing(8)
+        mode_lbl = QLabel("功能")
+        mode_lbl.setStyleSheet(f"color: {_TEXT_MUTED}; font-size: 12px;")
+        mode_row.addWidget(mode_lbl)
+        self.mode_combo = QComboBox()
+        self.mode_combo.addItem("椭圆检测")
+        self.mode_combo.addItem("线扫标定")
+        mode_row.addWidget(self.mode_combo, stretch=1)
+        pl.addLayout(mode_row)
+
+        # ── Stacked content area ──────────────────────────────────────
+        self.mode_stack = QStackedWidget()
+        pl.addWidget(self.mode_stack, stretch=1)
+        self.mode_combo.currentIndexChanged.connect(self.mode_stack.setCurrentIndex)
+        self.mode_combo.currentIndexChanged.connect(self.left_stack.setCurrentIndex)
+
+        # ──── Page 0: 椭圆检测 ────────────────────────────────────────
+        page0 = QWidget()
+        p0 = QVBoxLayout(page0)
+        p0.setContentsMargins(0, 4, 0, 0)
+        p0.setSpacing(8)
+
         self.btn_detect = QPushButton("检测椭圆")
         self.btn_detect.setEnabled(False)
         self.btn_detect.clicked.connect(self._detect)
@@ -297,23 +375,13 @@ class MainWindow(QMainWindow):
         self.btn_clear.setEnabled(False)
         self.btn_clear.clicked.connect(self._clear_roi)
 
-        pl.addWidget(self.btn_open)
-
-        rot_row = QHBoxLayout()
-        rot_row.setSpacing(8)
-        rot_row.addWidget(self.btn_rotate_left)
-        rot_row.addWidget(self.btn_rotate_right)
-        pl.addLayout(rot_row)
-
         det_row = QHBoxLayout()
         det_row.setSpacing(8)
         det_row.addWidget(self.btn_detect)
         det_row.addWidget(self.btn_clear)
-        pl.addLayout(det_row)
+        p0.addLayout(det_row)
 
-        pl.addSpacing(6)
-
-        # ── 参数输入 card (二值化 + 曝光 + 圆直径) ────────────────────
+        # 参数输入 card
         input_card = QFrame()
         input_card.setObjectName("metric_card")
         in_lay = QVBoxLayout(input_card)
@@ -359,10 +427,9 @@ class MainWindow(QMainWindow):
         diam_row.addWidget(self.circle_diam_input)
         in_lay.addLayout(diam_row)
 
-        pl.addWidget(input_card)
-        pl.addSpacing(4)
+        p0.addWidget(input_card)
 
-        # ── Image info card (compact, single row) ─────────────────────
+        # Image info card
         img_card = QFrame()
         img_card.setObjectName("metric_card")
         ic_lay = QVBoxLayout(img_card)
@@ -388,13 +455,10 @@ class MainWindow(QMainWindow):
         info_row.addWidget(self.lbl_img_y)
         info_row.addStretch()
         ic_lay.addLayout(info_row)
-        pl.addWidget(img_card)
+        p0.addWidget(img_card)
 
-        pl.addSpacing(4)
-
-        # ── Detection results table ───────────────────────────────────
-        pl.addWidget(_section_label("检测结果"))
-
+        # Detection results table
+        p0.addWidget(_section_label("检测结果"))
         self.table = QTableWidget(0, 4)
         self.table.setHorizontalHeaderLabels(["#", "X轴(px)", "Y轴(px)", "Y/X"])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
@@ -403,12 +467,10 @@ class MainWindow(QMainWindow):
         self.table.setAlternatingRowColors(True)
         self.table.verticalHeader().setVisible(False)
         self.table.setShowGrid(False)
-        self.table.setMinimumHeight(140)
-        pl.addWidget(self.table, stretch=1)
+        self.table.setMinimumHeight(100)
+        p0.addWidget(self.table, stretch=1)
 
-        pl.addSpacing(4)
-
-        # ── 测量结果 combined card ────────────────────────────────────
+        # 测量结果 combined card
         result_card = QFrame()
         result_card.setObjectName("metric_card")
         rl = QVBoxLayout(result_card)
@@ -430,7 +492,6 @@ class MainWindow(QMainWindow):
             col.addWidget(ttl_lbl)
             return col, val_lbl
 
-        # 平均 Y / X
         avg_hdr = QLabel("平均 Y / X 比值".upper())
         avg_hdr.setObjectName("section_label")
         avg_hdr.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -448,7 +509,6 @@ class MainWindow(QMainWindow):
         sep1.setStyleSheet(f"color: {_BORDER};")
         rl.addWidget(sep1)
 
-        # 乘法器 | 后分配器
         cols = QHBoxLayout()
         cols.setSpacing(0)
         col_mult, self.lbl_mult     = _param_col("乘法器")
@@ -466,7 +526,6 @@ class MainWindow(QMainWindow):
         sep2.setStyleSheet(f"color: {_BORDER};")
         rl.addWidget(sep2)
 
-        # 最大采集频率
         freq_hdr = QLabel("最大采集频率".upper())
         freq_hdr.setObjectName("section_label")
         freq_hdr.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -484,7 +543,6 @@ class MainWindow(QMainWindow):
         sep3.setStyleSheet(f"color: {_BORDER};")
         rl.addWidget(sep3)
 
-        # 比例尺
         scale_hdr = QLabel("比例尺".upper())
         scale_hdr.setObjectName("section_label")
         scale_hdr.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -504,14 +562,77 @@ class MainWindow(QMainWindow):
 
         unit_lbl = QLabel("mm/px")
         unit_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        unit_lbl.setStyleSheet(f"color: {_TEXT_MUTED}; font-size: 10px; font-weight: 600; letter-spacing: 1px;")
+        unit_lbl.setStyleSheet(
+            f"color: {_TEXT_MUTED}; font-size: 10px; font-weight: 600; letter-spacing: 1px;"
+        )
         rl.addWidget(unit_lbl)
 
-        pl.addWidget(result_card)
+        p0.addWidget(result_card)
+        self.mode_stack.addWidget(page0)
+
+        # ──── Page 1: 线扫标定 ───────────────────────────────────────
+        page1 = QWidget()
+        p1 = QVBoxLayout(page1)
+        p1.setContentsMargins(0, 4, 0, 0)
+        p1.setSpacing(8)
+
+        p1.addWidget(_section_label("点位列表"))
+
+        self.point_table = QTableWidget(0, 5)
+        self.point_table.setHorizontalHeaderLabels(["编号", "像素 X", "像素 Y", "真实 X", "真实 Y"])
+        self.point_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.point_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.point_table.setAlternatingRowColors(True)
+        self.point_table.verticalHeader().setVisible(False)
+        self.point_table.setShowGrid(False)
+        self.point_table.setMinimumHeight(120)
+        self.point_table.itemChanged.connect(self._on_point_table_changed)
+        p1.addWidget(self.point_table, stretch=1)
+
+        pt_btn_row = QHBoxLayout()
+        pt_btn_row.setSpacing(8)
+        self.btn_delete_point = QPushButton("删除选中")
+        self.btn_delete_point.setObjectName("btn_clear")
+        # NoFocus: clicking the button won't steal focus from the table,
+        # so selectedRows() remains valid when the handler fires.
+        self.btn_delete_point.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_delete_point.clicked.connect(self._delete_selected_point)
+        pt_btn_row.addWidget(self.btn_delete_point)
+        self.btn_clear_points = QPushButton("清除全部")
+        self.btn_clear_points.setObjectName("btn_clear")
+        self.btn_clear_points.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_clear_points.clicked.connect(self._clear_all_points)
+        pt_btn_row.addWidget(self.btn_clear_points)
+        p1.addLayout(pt_btn_row)
+
+        self.btn_import_real = QPushButton("导入真实坐标")
+        self.btn_import_real.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_import_real.clicked.connect(self._import_real_coords)
+        p1.addWidget(self.btn_import_real)
+
+        # Delete / Backspace key deletes the selected row directly
+        def _pt_key_press(event):
+            if event.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
+                self._delete_selected_point()
+            else:
+                QTableWidget.keyPressEvent(self.point_table, event)
+        self.point_table.keyPressEvent = _pt_key_press
+
+        self.mode_stack.addWidget(page1)
 
         root.addWidget(panel)
 
+        # ── Status bar ────────────────────────────────────────────────
         self.statusBar().showMessage("就绪 — 请打开图片")
+
+        self._lbl_cursor = QLabel("  ")
+        self._lbl_cursor.setStyleSheet(
+            f"color: {_TEXT_MUTED}; font-size: 11px; padding-right: 10px;"
+        )
+        self.statusBar().addPermanentWidget(self._lbl_cursor)
+
+        self.image_view.mouse_pos_changed.connect(self._on_mouse_pos_changed)
+        self.point_picker_view.mouse_pos_changed.connect(self._on_mouse_pos_changed)
 
     def _build_menu(self):
         menu = self.menuBar()
@@ -551,6 +672,7 @@ class MainWindow(QMainWindow):
             return
         self._bgr_image = img
         self.image_view.load_image(img)
+        self.point_picker_view.load_image(img)
         self._current_roi = None
         self.btn_rotate_left.setEnabled(True)
         self.btn_rotate_right.setEnabled(True)
@@ -777,6 +899,123 @@ class MainWindow(QMainWindow):
         )
         return cv2.getRectSubPix(rotated, (width, height), center)
 
+    # ── Cursor coordinate display ─────────────────────────────────── #
+    def _on_mouse_pos_changed(self, x: float, y: float):
+        if x < 0:
+            self._lbl_cursor.setText("  ")
+        else:
+            self._lbl_cursor.setText(f"X: {x:.1f}   Y: {y:.1f}  px")
+
+    # ── Point picker handlers ─────────────────────────────────────── #
+    def _on_points_changed(self, points: list[dict]):
+        self._updating_point_table = True
+        self.point_table.setRowCount(len(points))
+        ro_flags = Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
+        for i, p in enumerate(points):
+            for col, text in enumerate([str(p["id"]), f"{p['x']:.2f}", f"{p['y']:.2f}"]):
+                item = QTableWidgetItem(text)
+                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.point_table.setItem(i, col, item)
+            real = self._real_coords_by_id.get(p["id"])
+            for col, text in enumerate([
+                f"{real[0]:.3f}" if real else "—",
+                f"{real[1]:.3f}" if real else "—",
+            ], start=3):
+                item = QTableWidgetItem(text)
+                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                item.setFlags(ro_flags)
+                item.setForeground(QColor(_GREEN))
+                self.point_table.setItem(i, col, item)
+        self._updating_point_table = False
+
+    def _on_point_table_changed(self, item):
+        if self._updating_point_table:
+            return
+        if item.column() > 2:   # 真实坐标列只读，不同步回视图
+            return
+        rows = self.point_table.rowCount()
+        points = []
+        for i in range(rows):
+            try:
+                pid = int(self.point_table.item(i, 0).text())
+                x   = float(self.point_table.item(i, 1).text())
+                y   = float(self.point_table.item(i, 2).text())
+                points.append({"id": pid, "x": x, "y": y})
+            except (AttributeError, ValueError):
+                pass
+        self.point_picker_view.set_points_silent(points)
+
+    def _delete_selected_point(self):
+        selected_rows = {idx.row() for idx in self.point_table.selectionModel().selectedRows()}
+        if not selected_rows:
+            # fallback: use the keyboard-focused row
+            row = self.point_table.currentRow()
+            if row < 0:
+                return
+            selected_rows = {row}
+        current = self.point_picker_view.get_points()
+        new_points = [p for i, p in enumerate(current) if i not in selected_rows]
+        self.point_picker_view.set_points_silent(new_points)
+        self._on_points_changed(new_points)
+        # keep focus on table so next Delete key works immediately
+        self.point_table.setFocus()
+
+    def _clear_all_points(self):
+        self._real_coords_by_id.clear()
+        self.point_picker_view.clear_points()   # also clears _real_coords_by_id in view
+
+    def _import_real_coords(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "导入真实坐标", "", "坐标文件 (*.txt);;所有文件 (*)"
+        )
+        if not path:
+            return
+
+        # 解析 xst_start … xst_end 之间的坐标行
+        real_coords: list[tuple[float, float]] = []
+        try:
+            with open(path, encoding="utf-8", errors="replace") as f:
+                content = f.read()
+            start = content.find("xst_start")
+            end   = content.find("xst_end")
+            if start == -1 or end == -1 or end <= start:
+                raise ValueError("未找到 xst_start / xst_end 标记")
+            section = content[start + len("xst_start"):end]
+            for line in section.splitlines():
+                line = line.strip().rstrip(";").strip()
+                if not line:
+                    continue
+                parts = line.split(",")
+                if len(parts) != 2:
+                    continue
+                real_coords.append((float(parts[0]), float(parts[1])))
+        except Exception as exc:
+            QMessageBox.warning(self, "读取失败", f"无法解析文件：{exc}")
+            return
+
+        if not real_coords:
+            QMessageBox.warning(self, "无数据", "文件中未解析到任何坐标。")
+            return
+
+        pixel_points = self.point_picker_view.get_points()
+        if len(real_coords) != len(pixel_points):
+            QMessageBox.warning(
+                self, "数量不匹配",
+                f"像素点 {len(pixel_points)} 个，"
+                f"真实坐标 {len(real_coords)} 个，数量不一致。\n"
+                "请确认已标记全部像素点后再导入。"
+            )
+            return
+
+        # 按顺序将真实坐标绑定到各点 ID
+        self._real_coords_by_id = {
+            p["id"]: real_coords[i] for i, p in enumerate(pixel_points)
+        }
+        self.point_picker_view.set_real_coords(self._real_coords_by_id)
+        self._on_points_changed(pixel_points)
+        self.statusBar().showMessage(f"已导入 {len(real_coords)} 个真实坐标")
+
+    # ── Shared helpers ────────────────────────────────────────────── #
     @staticmethod
     def _cell(text: str) -> QTableWidgetItem:
         item = QTableWidgetItem(text)
