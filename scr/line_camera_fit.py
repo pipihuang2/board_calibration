@@ -120,31 +120,5 @@ def load_params(filename):
     return np.array(params['x_params']), np.array(params['y_params'])
 
 
-# 示例用法
-if __name__ == "__main__":
-    from fit_data import points_A_6 as pA1
-    from fit_data import points_B_11_21 as pB1
 
-
-    # ===== 这里你自己对应好：哪个是“真实”，哪个是“像素” =====
-    # 比如：pA1 是真实坐标，pB1 是像素坐标
-    from fit_data import points_A_12_12 as points_world   # 真实坐标
-    from fit_data import points_B_12_12 as points_pixel  # 像素坐标
-
-    points_world = np.asarray(points_world, dtype=np.float64)
-    points_pixel = np.asarray(points_pixel, dtype=np.float64)
-
-    # 1) 真实 -> 像素
-    x_params_w2p, y_params_w2p = fit_custom_transform_pix_to_world(points_world, points_pixel)
-    mse_w2p = calc_mse(points_world, points_pixel, x_params_w2p, y_params_w2p)
-    print("真实 -> 像素 拟合均方误差:", mse_w2p)
-
-    # 2) 像素 -> 真实（反向再拟合一次）
-    x_params_p2w, y_params_p2w = fit_custom_transform_pix_to_world(points_pixel, points_world)
-    mse_p2w = calc_mse(points_pixel, points_world, x_params_p2w, y_params_p2w)
-    print("像素 -> 真实 拟合均方误差:", mse_p2w)
-
-    # 可选：分别保存两套参数
-    # save_params(x_params_w2p, y_params_w2p, "right_fit_params_world_to_pixel.json")
-    # save_params(x_params_p2w, y_params_p2w, "right_fit_params_pixel_to_world.json")
 
