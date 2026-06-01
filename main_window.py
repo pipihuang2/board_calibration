@@ -1,7 +1,11 @@
 from __future__ import annotations
 import cv2
+import json
 import math
+import os
+import sys
 import numpy as np
+from scr.line_camera_fit import fit_custom_transform_pix_to_world, transform_point
 
 def best_fraction(ratio: float,
                   max_num: int = 128,   # 后分配器上限
@@ -261,6 +265,8 @@ class MainWindow(QMainWindow):
         self._current_roi: RotatedRoi | None = None
         self._updating_point_table = False
         self._real_coords_by_id: dict[int, tuple[float, float]] = {}
+        self._x_params: np.ndarray | None = None
+        self._y_params: np.ndarray | None = None
 
         self._build_ui()
         self._build_menu()
@@ -617,6 +623,55 @@ class MainWindow(QMainWindow):
             else:
                 QTableWidget.keyPressEvent(self.point_table, event)
         self.point_table.keyPressEvent = _pt_key_press
+
+        # ── Fit / save / load section ─────────────────────────────────
+        sep_fit = QFrame()
+        sep_fit.setFrameShape(QFrame.Shape.HLine)
+        sep_fit.setStyleSheet(f"color: {_BORDER};")
+        p1.addWidget(sep_fit)
+
+        p1.addWidget(_section_label("拟合标定"))
+
+        self.btn_fit = QPushButton("拟合转换")
+        self.btn_fit.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_fit.clicked.connect(self._fit_transform)
+        p1.addWidget(self.btn_fit)
+
+        save_load_row = QHBoxLayout()
+        save_load_row.setSpacing(8)
+        self.btn_save_calib = QPushButton("保存标定")
+        self.btn_save_calib.setObjectName("btn_clear")
+        self.btn_save_calib.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_save_calib.clicked.connect(self._save_calibration)
+        save_load_row.addWidget(self.btn_save_calib)
+        self.btn_load_calib = QPushButton("读取标定")
+        self.btn_load_calib.setObjectName("btn_clear")
+        self.btn_load_calib.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_load_calib.clicked.connect(self._load_calibration)
+        save_load_row.addWidget(self.btn_load_calib)
+        p1.addLayout(save_load_row)
+
+        # ── Error results table ───────────────────────────────────────
+        err_hdr_row = QHBoxLayout()
+        err_hdr_row.addWidget(_section_label("拟合误差"))
+        self._lbl_mean_err = QLabel("—")
+        self._lbl_mean_err.setStyleSheet(
+            f"color: {_GREEN}; font-size: 11px; font-weight: 600;"
+        )
+        self._lbl_mean_err.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        err_hdr_row.addWidget(self._lbl_mean_err, stretch=1)
+        p1.addLayout(err_hdr_row)
+
+        self.error_table = QTableWidget(0, 2)
+        self.error_table.setHorizontalHeaderLabels(["编号", "误差 (px)"])
+        self.error_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.error_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.error_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.error_table.setAlternatingRowColors(True)
+        self.error_table.verticalHeader().setVisible(False)
+        self.error_table.setShowGrid(False)
+        self.error_table.setMaximumHeight(160)
+        p1.addWidget(self.error_table)
 
         self.mode_stack.addWidget(page1)
 
@@ -1014,6 +1069,129 @@ class MainWindow(QMainWindow):
         self.point_picker_view.set_real_coords(self._real_coords_by_id)
         self._on_points_changed(pixel_points)
         self.statusBar().showMessage(f"已导入 {len(real_coords)} 个真实坐标")
+
+    def _fit_transform(self):
+        pixel_points = self.point_picker_view.get_points()
+        if len(pixel_points) < 5:
+            QMessageBox.warning(self, "点数不足",
+                                "至少需要 5 个像素点才能完成拟合（y 方向含三次项）。")
+            return
+        missing = [p["id"] for p in pixel_points if p["id"] not in self._real_coords_by_id]
+        if missing:
+            QMessageBox.warning(self, "缺少真实坐标",
+                                f"以下点缺少真实坐标，请先导入：{missing}")
+            return
+
+        points_pixel = np.array([[p["x"], p["y"]] for p in pixel_points])
+        points_real  = np.array([self._real_coords_by_id[p["id"]] for p in pixel_points])
+
+        try:
+            self._x_params, self._y_params = fit_custom_transform_pix_to_world(
+                points_pixel, points_real
+            )
+        except Exception as exc:
+            QMessageBox.critical(self, "拟合失败", str(exc))
+            return
+
+        self._populate_error_table(pixel_points)
+        self.statusBar().showMessage(
+            f"拟合完成  平均误差: {self._lbl_mean_err.text()}"
+        )
+
+    def _populate_error_table(self, pixel_points: list[dict]):
+        """计算每个点的欧式距离误差并填入 error_table（按误差从大到小）。"""
+        errors: list[tuple[int, float]] = []
+        for p in pixel_points:
+            real = self._real_coords_by_id.get(p["id"])
+            if real is None:
+                continue
+            pred = transform_point((p["x"], p["y"]), self._x_params, self._y_params)
+            dist = math.hypot(pred[0] - real[0], pred[1] - real[1])
+            errors.append((p["id"], dist))
+
+        errors.sort(key=lambda t: t[1], reverse=True)
+        mean_err = sum(e[1] for e in errors) / len(errors) if errors else 0.0
+        self._lbl_mean_err.setText(f"均值 {mean_err:.4f} px")
+
+        # Color thresholds: top-third → red, mid-third → yellow, rest → green
+        n = len(errors)
+        # Divide into thirds by rank (list is already sorted desc)
+        top_cut = max(1, n // 3)        # top third: highest errors → red
+        mid_cut = max(top_cut, 2 * n // 3)   # middle third → yellow
+
+        self.error_table.setRowCount(n)
+        for i, (pid, dist) in enumerate(errors):
+            if i < top_cut:
+                color = QColor("#F87171")   # red  — highest errors
+            elif i < mid_cut:
+                color = QColor("#FBBF24")   # yellow
+            else:
+                color = QColor(_GREEN)      # green — lowest errors
+
+            id_item  = QTableWidgetItem(str(pid))
+            err_item = QTableWidgetItem(f"{dist:.4f}")
+            for item in (id_item, err_item):
+                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                item.setForeground(color)
+            self.error_table.setItem(i, 0, id_item)
+            self.error_table.setItem(i, 1, err_item)
+
+    def _save_calibration(self):
+        if self._x_params is None:
+            QMessageBox.warning(self, "尚未拟合", "请先执行【拟合转换】再保存。")
+            return
+
+        path, _ = QFileDialog.getSaveFileName(
+            self, "保存标定文件", "", "JSON 文件 (*.json);;所有文件 (*)"
+        )
+        if not path:
+            return
+
+        pixel_points = self.point_picker_view.get_points()
+        data = {
+            "version": "1.0",
+            "pixel_points": pixel_points,
+            "real_coords": {
+                str(pid): list(rc) for pid, rc in self._real_coords_by_id.items()
+            },
+            "x_params": self._x_params.tolist(),
+            "y_params": self._y_params.tolist(),
+        }
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            self.statusBar().showMessage(f"标定文件已保存: {path}")
+        except Exception as exc:
+            QMessageBox.critical(self, "保存失败", str(exc))
+
+    def _load_calibration(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "读取标定文件", "", "JSON 文件 (*.json);;所有文件 (*)"
+        )
+        if not path:
+            return
+
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            pixel_points = data["pixel_points"]
+            real_coords: dict[int, tuple[float, float]] = {
+                int(k): tuple(v) for k, v in data["real_coords"].items()
+            }
+            x_params = np.array(data["x_params"])
+            y_params = np.array(data["y_params"])
+        except Exception as exc:
+            QMessageBox.critical(self, "读取失败", f"无法解析文件：{exc}")
+            return
+
+        self._x_params = x_params
+        self._y_params = y_params
+        self._real_coords_by_id = real_coords
+        self.point_picker_view.set_points_silent(pixel_points)
+        self.point_picker_view.set_real_coords(real_coords)
+        self._on_points_changed(pixel_points)
+        self._populate_error_table(pixel_points)
+        self.statusBar().showMessage(f"标定文件已读取: {path}")
 
     # ── Shared helpers ────────────────────────────────────────────── #
     @staticmethod
